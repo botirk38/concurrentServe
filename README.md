@@ -18,8 +18,8 @@ ConcurrentServe is a compact, multithreaded web server in C, designed for educat
 ## Installation
 Clone the repository to your local machine:
 ```sh
-git clone https://github.com/yourusername/multithreaded-webserver-c.git
-cd multithreaded-webserver-c
+git clone [https://github.com/yourusername/multithreaded-webserver-c.git](https://github.com/botirk38/concurrentServe/tree/main)
+cd concurrentServe
 ```
 
 ## Compilation
