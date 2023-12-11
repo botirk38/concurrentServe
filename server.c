@@ -101,8 +101,16 @@ void process_json_value(cJSON *json){
 	}
 }
 
-void process_json_data(const char *data){
-	
+void process_json(cJSON *json){
+	cJSON *item = json -> child;
+	while(item){
+
+		if(item -> string){
+			printf("Key: %s\n", item -> string)
+		}
+		process_json_value(item);
+		item -> item.next;
+	}
 }
 
 
