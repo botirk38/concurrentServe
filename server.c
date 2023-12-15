@@ -18,6 +18,8 @@ int initialize_server(int port){
 	int server_fd;
 	struct sockaddr_in address;
 
+	// Initalize OpenSSL Certificate
+
 	// Create the socket
 	server_fd = socket(AF_INET, SOCK_STREAM, 0);
 
