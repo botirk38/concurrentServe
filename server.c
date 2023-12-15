@@ -6,6 +6,9 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <cjson/cJSON.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 
 int initialize_server(int port);
 
