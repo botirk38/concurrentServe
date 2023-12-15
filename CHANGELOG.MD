@@ -1,6 +1,6 @@
 
 
-### Changelog for Release v1.5.0 - [Release Date]
+### Changelog for Release v1.5.0 - 15/12/2023
 
 #### New Features:
 - **JSON Parsing Implementation:** 
