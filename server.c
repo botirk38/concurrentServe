@@ -13,12 +13,55 @@
 int initialize_server(int port);
 
 
+SSL_CTX* init_ctx(void){
+	const SSL_METHOD *method;
+	SSL_CTX *ctx;
+
+	method = TLS_server_method();
+	ctx = SSL_CTX_new(method);
+
+	if(!ctx){
+		perror("Unable to create SSL context");
+		ERR_print_errors_fp(stderr);
+		exit(EXIT_FAILURE);
+	}
+
+	reutrn ctx;
+}
+
+
+
+void load_certificates(SSL_CTX* ctx, char* cert_file, char* key_file) {
+    // Set the local certificate from cert_file
+    if (SSL_CTX_use_certificate_file(ctx, cert_file, SSL_FILETYPE_PEM) <= 0) {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+
+    // Set the private key from key_file (may be the same as cert_file)
+    if (SSL_CTX_use_PrivateKey_file(ctx, key_file, SSL_FILETYPE_PEM) <= 0) {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+
+    // Verify private key
+    if (!SSL_CTX_check_private_key(ctx)) {
+        fprintf(stderr, "Private key does not match the public certificate\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
 
 int initialize_server(int port){
 	int server_fd;
 	struct sockaddr_in address;
 
 	// Initalize OpenSSL Certificate
+	
+	SSL_load_error_strings();
+	OpenSSL_add_ssl_algorithms();
+	*ctx = init_ctx();
+	load_certificates(*ctx, "path/to/cert.pem", "path/to/key.pem");
 
 	// Create the socket
 	server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -205,5 +248,7 @@ int main() {
 
     // Close the server socket
     close(server_fd);
+    SSL_CTX_free(ctx);
+    EVP_cleanup();
     return 0;
 }
