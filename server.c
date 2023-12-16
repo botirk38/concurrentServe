@@ -56,7 +56,7 @@ int initialize_server(int port){
 	int server_fd;
 	struct sockaddr_in address;
 
-	// Initalize OpenSSL Certificate
+	// Initalize OpenSSL self Certificate
 	
 	SSL_load_error_strings();
 	OpenSSL_add_ssl_algorithms();
