@@ -14,12 +14,11 @@ jobs:
     - uses: actions/checkout@v3
 
     - name: Install dependencies (if necessary)
-      run: sudo apt-get install autoconf # or other dependencies
+      run: sudo apt-get install autoconf automake # Add other necessary tools
 
-    - name: Generate configure script (if necessary)
+    - name: Generate configure script
       run: |
-        chmod +x autogen.sh
-        ./autogen.sh
+        autoconf
 
     - name: Configure
       run: |
@@ -34,4 +33,3 @@ jobs:
 
     - name: Make distcheck
       run: make distcheck
-
