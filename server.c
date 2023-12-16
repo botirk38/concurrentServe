@@ -183,6 +183,19 @@ void process_put_data(const char *loc, const char *data){
 	fclose(file);
 }
 
+int delete_resource(const char *loc){
+	char filepath[256];
+	sprintf(filepath, "data/%s", loc);
+
+	if(remove(filepath) == 0){
+		printf("File %s deleted successfully.\n", filepath);
+		return 0;
+	}else{
+		printf("File not found.\n");
+		return 1;
+	}
+}
+
 
 void *handleClient(void* client_socket_ptr){
 	int client_socket = *((int *) client_socket_ptr);
@@ -245,9 +258,17 @@ void *handleClient(void* client_socket_ptr){
 		free(put_data);
 
 		char* response = "HTTP/1.1 200 OK\nContent-Type: text/plain\n\nResource updated";	
+		} else if(strcmp(method, "DELETE")  == 0 && strcmp(uri, "/") == 0){
+			if(delete_resource(uri) == 0){
+				char *response = "HTTP/1.1 200 OK\nContent-Type: text/plain\n\nResource deleted";
+				send(client_socket, response, strlen(response), 0);
+			} else {
+				char* response = "HTTP/1.1 404 Not Found\nContent-Type: text/plain\n\nResource not found";
+				send(client_socket, response, strlen(response), 0);
+		}
 		} else {
-		char* response = "HTTP/1.1 404 Not Found\nContent-Type: text/plain\n\nResource not found";
-		send(client_socket, response, strlen(response), 0);
+			char* response = "HTTP/1.1 404 Not Found\nContent-Type: text/plain\n\nResource not found";
+			send(client_socket, response, strlen(response), 0);
 		}
 	return NULL;
 }
