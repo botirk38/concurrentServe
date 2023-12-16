@@ -8,6 +8,9 @@
 #include <cjson/cJSON.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <stdbool.h>
+#include <time.h>
+#include <sys/stat.h>
 
 
 SSL_CTX* init_ctx(void);
@@ -197,6 +200,70 @@ int delete_resource(const char *loc){
 }
 
 
+bool endsWith(const char *str, const char *suffix) {
+    if (!str || !suffix) {
+        return false;
+    }
+    size_t lenstr = strlen(str);
+    size_t lensuffix = strlen(suffix);
+    if (lensuffix >  lenstr) {
+        return false;
+    }
+    return strncmp(str + lenstr - lensuffix, suffix, lensuffix) == 0;
+}
+
+const char* getContentType(const char* uri) {
+
+    if (endsWith(uri, ".html") || endsWith(uri, ".htm")) {
+        return "text/html";
+    } else if (endsWith(uri, ".jpg") || endsWith(uri, ".jpeg")) {
+        return "image/jpeg";
+    } else if (endsWith(uri, ".png")) {
+        return "image/png";
+    } else if (endsWith(uri, ".css")) {
+        return "text/css";
+    } else if (endsWith(uri, ".js")) {
+        return "application/javascript";
+    } else if (endsWith(uri, ".json")) {
+        return "application/json";
+    } else {
+        // Default content type
+        return "text/plain";
+    }
+}
+
+const char* getLastModified(const char* uri){
+	struct stat statbuf;
+	static char lastModified[128];
+	char filepath[256];
+	sprintf(filepath, "data%s", uri);
+
+	if(stat(filepath, &statbuf) == 0){
+		struct tm *tm = gmtime(&statbuf.st_mtime);
+		strftime(lastModified, sizeof(lastModified), "%a, %d %b %Y %H:%M:%S GMT", tm);
+		return lastModified;
+	} else {
+		perror("Failed to get last modified time");
+		return NULL;
+	}
+
+
+
+}
+
+const long getContentLength(const char* file_path){
+	struct stat file_stat;
+
+	if(stat(file_path, &file_stat) == 0){
+		return (long)file_stat.st_size;
+	}
+
+	return -1;
+}
+
+
+
+
 void *handleClient(void* client_socket_ptr){
 	int client_socket = *((int *) client_socket_ptr);
 	free(client_socket_ptr);
@@ -208,14 +275,28 @@ void *handleClient(void* client_socket_ptr){
 		perror("Error reading from socket.");
 	}
 
-	char method[10], uri[50], content_type[50];
+	char method[10], uri[50], content_type[50], filepath[256];
 	int content_length = 0;
+	const char* contentType = getContentType(uri);
 	parse_request(buffer, method, uri, &content_length);
-	parse_headers(buffer, content_type, &content_length);
 
-	if(strcmp(method, "GET") == 0 && strcmp(uri, "/") == 0 ){
-		char* response = "HTTP/1.1 200 OK\nContent-Type: text/plain\n\nWelcome to the server!";
-		send(client_socket, response, strlen(response), 0);
+	if(strcmp(method, "GET") == 0){
+		sprintf(filepath, "data/%s", uri);
+
+		content_length = getContentLength(filepath);
+		if(content_length >=0){
+			char response_header[1024];
+			sprintf(response_header, 
+				"HTTP/1.1 200 OK\r\n"
+				"Content-Type: text/plain\r\n" // Use actual content type
+				"Content-Length: %d\r\n"
+				"\r\n",
+				content_length);
+			send(client_socket, response_header, strlen(response_header), 0);
+		} else {
+			char* response = "HTTP/1.1 404 Not Found\r\n\r\n";
+			send(client_socket, response, strlen(response), 0);
+		}
 	} else if(strcmp(method, "POST") == 0 && strcmp(uri, "/") == 0 ){
 		char *post_data = malloc(content_length + 1);
 		if(!post_data){
@@ -258,18 +339,27 @@ void *handleClient(void* client_socket_ptr){
 		free(put_data);
 
 		char* response = "HTTP/1.1 200 OK\nContent-Type: text/plain\n\nResource updated";	
-		} else if(strcmp(method, "DELETE")  == 0 && strcmp(uri, "/") == 0){
-			if(delete_resource(uri) == 0){
-				char *response = "HTTP/1.1 200 OK\nContent-Type: text/plain\n\nResource deleted";
-				send(client_socket, response, strlen(response), 0);
-			} else {
-				char* response = "HTTP/1.1 404 Not Found\nContent-Type: text/plain\n\nResource not found";
-				send(client_socket, response, strlen(response), 0);
-		}
+	} else if(strcmp(method, "DELETE")  == 0 && strcmp(uri, "/") == 0){
+		if(delete_resource(uri) == 0){
+			char *response = "HTTP/1.1 200 OK\nContent-Type: text/plain\n\nResource deleted";
+			send(client_socket, response, strlen(response), 0);
 		} else {
 			char* response = "HTTP/1.1 404 Not Found\nContent-Type: text/plain\n\nResource not found";
 			send(client_socket, response, strlen(response), 0);
 		}
+	} else if(strcmp(method, "HEAD") == 0 && strcmp(uri, "/") == 0) {
+		int contentLength = getContentLength(filepath);
+		char lastModified[128];
+		strncpy(lastModified, getLastModified(uri) ? getLastModified(uri) : "", sizeof(lastModified));
+		char headers[1024];
+		
+		 send(client_socket, headers, strlen(headers), 0); // Won't run yet need to implement getLastModified
+		
+	} else {
+		char* response = "HTTP/1.1 404 Not Found\nContent-Type: text/plain\n\nResource not found";
+		send(client_socket, response, strlen(response), 0);
+	}
+
 	return NULL;
 }
 
