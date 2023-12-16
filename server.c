@@ -10,82 +10,75 @@
 #include <openssl/err.h>
 
 
-int initialize_server(int port);
+SSL_CTX* init_ctx(void);
+void load_certificates(SSL_CTX* ctx, char* cert_file, char* key_file);
+int initialize_server(int port, SSL_CTX **ctx);
+void process_json(cJSON *json);
+void process_json_value(cJSON *item);
 
+SSL_CTX* init_ctx(void) {
+    const SSL_METHOD *method;
+    SSL_CTX *ctx;
 
-SSL_CTX* init_ctx(void){
-	const SSL_METHOD *method;
-	SSL_CTX *ctx;
+    method = TLS_server_method();
+    ctx = SSL_CTX_new(method);
 
-	method = TLS_server_method();
-	ctx = SSL_CTX_new(method);
+    if (!ctx) {
+        perror("Unable to create SSL context");
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
 
-	if(!ctx){
-		perror("Unable to create SSL context");
-		ERR_print_errors_fp(stderr);
-		exit(EXIT_FAILURE);
-	}
-
-	reutrn ctx;
+    return ctx;
 }
 
-
-
 void load_certificates(SSL_CTX* ctx, char* cert_file, char* key_file) {
-    // Set the local certificate from cert_file
     if (SSL_CTX_use_certificate_file(ctx, cert_file, SSL_FILETYPE_PEM) <= 0) {
         ERR_print_errors_fp(stderr);
         exit(EXIT_FAILURE);
     }
 
-    // Set the private key from key_file (may be the same as cert_file)
     if (SSL_CTX_use_PrivateKey_file(ctx, key_file, SSL_FILETYPE_PEM) <= 0) {
         ERR_print_errors_fp(stderr);
         exit(EXIT_FAILURE);
     }
 
-    // Verify private key
     if (!SSL_CTX_check_private_key(ctx)) {
         fprintf(stderr, "Private key does not match the public certificate\n");
         exit(EXIT_FAILURE);
     }
 }
 
+int initialize_server(int port, SSL_CTX **ctx) {
+    int server_fd;
+    struct sockaddr_in address;
 
-int initialize_server(int port){
-	int server_fd;
-	struct sockaddr_in address;
+    SSL_load_error_strings();
+    OpenSSL_add_ssl_algorithms();
+    *ctx = init_ctx();
+    load_certificates(*ctx, "path/to/cert.pem", "path/to/key.pem");
 
-	// Initalize OpenSSL Certificate
-	
-	SSL_load_error_strings();
-	OpenSSL_add_ssl_algorithms();
-	*ctx = init_ctx();
-	load_certificates(*ctx, "path/to/cert.pem", "path/to/key.pem");
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd == -1) {
+        perror("Socket creation failed.");
+        exit(EXIT_FAILURE);
+    }
 
-	// Create the socket
-	server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(port);
 
-	if(server_fd == - 1){
-		perror("Socket creation failed.");
-		exit(EXIT_FAILURE);
-	}
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        perror("Socket binding failed.");
+        exit(EXIT_FAILURE);
+    }
 
-	address.sin_family = AF_INET;
-	address.sin_addr.s_addr = INADDR_ANY;
-	address.sin_port = htons(port);
+    if (listen(server_fd, 3) < 0) {
+        perror("Listen failed.");
+        exit(EXIT_FAILURE);
+    }
 
-	if(bind(server_fd, (struct sockaddr *) &address, sizeof(address)) < 0){
-		perror("Socket binding failed.");
-		exit(EXIT_FAILURE);
-	}
-
-	if(listen(server_fd, 3) < 0){
-		perror("Listen failed.");
-		exit(EXIT_FAILURE);
-	}
-
-	return server_fd;
+    return server_fd;
 }
 
 
@@ -130,7 +123,7 @@ void process_form_data(const char *data){
 	}
 }
 
-void process_json_value(cJSON *json){
+void process_json_value(cJSON *item){
 	switch(item -> type){
 		case cJSON_Number:
 			printf("Number: %f\n", item -> valuedouble);
@@ -140,11 +133,11 @@ void process_json_value(cJSON *json){
 			break;
 		case cJSON_Array:
 			printf("Array:\n");
-			process_json(item);
+			process_json(item -> child);
 			break;
 		case cJSON_Object:
 			printf("Object:\n");
-			process_json(item);
+			process_json(item -> child);
 			break;
 	}
 }
@@ -154,10 +147,10 @@ void process_json(cJSON *json){
 	while(item){
 
 		if(item -> string){
-			printf("Key: %s\n", item -> string)
+			printf("Key: %s\n", item -> string);
 		}
 		process_json_value(item);
-		item -> item.next;
+		item = item -> next;
 	}
 }
 
@@ -171,10 +164,7 @@ void *handleClient(void* client_socket_ptr){
 
 	if(val_read < 0){
 		perror("Error reading from socket.");
-		close(client_socket);
-		return NULL;
 	}
-	printf("Received: %s\n", buffer);
 
 	char method[10], uri[50], content_type[50];
 	int content_length;
@@ -197,8 +187,17 @@ void *handleClient(void* client_socket_ptr){
 		if(strcmp(content_type,"application/x-www-form-urlencoded") == 0 ){
 			process_form_data(post_data);
 		} else if(strcmp(content_type, "application/json") == 0){
-			// Process json data
+			cJSON *json_data = cJSON_Parse(post_data);
+
+			if(json_data != NULL){
+				process_json(json_data);
+				cJSON_Delete(json_data);
+			}else{
+				perror("JSON data is null");
+			}
 		}
+
+		free(post_data);
 
 	} else{
 		char* response = "HTTP/1.1 404 Not Found\nContent-Type: text/plain\n\nResource not found";
@@ -213,7 +212,9 @@ void *handleClient(void* client_socket_ptr){
 
 int main() {
     int port = 8080;
-    int server_fd = initialize_server(port);
+    SSL_CTX *ctx;
+
+    int server_fd = initialize_server(port, &ctx);
     printf("Server initialized at port %d\n", port);
 
     struct sockaddr_in address;
