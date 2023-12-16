@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "request_handler.h": "c",
+        "stdbool.h": "c",
+        "string.h": "c"
+    }
+}
