@@ -13,12 +13,16 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Install dependencies (if necessary)
-      run: sudo apt-get install autoconf automake # Add other necessary tools
+    - name: Install dependencies
+      run: sudo apt-get install autoconf automake libtool 
+
+    - name: Initialize Automake
+      run: |
+        aclocal
+        automake --add-missing
 
     - name: Generate configure script
-      run: |
-        autoconf
+      run: autoconf
 
     - name: Configure
       run: |
