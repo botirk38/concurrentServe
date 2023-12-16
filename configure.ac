@@ -1,5 +1,5 @@
-AC_INIT([YourProjectName], [1.0])
-AC_CONFIG_SRCDIR([src/main.c])
+AC_INIT([concurrentServe], [1.7])
+AC_CONFIG_SRCDIR([src/server.c])
 AC_CONFIG_HEADERS([config.h])
 AM_INIT_AUTOMAKE
 AC_PROG_CC
