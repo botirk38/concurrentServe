@@ -95,16 +95,30 @@ void parse_request(const char* buffer, char* method, char* uri, int* content_len
 	}
 }
 
+void parse_headers(const char* buffer, char* content_type, int* content_length) {
+    const char *header_line = buffer;
 
-void parse_headers(const char* buffer, char* content_type){
-	const char *content_type_str = strstr(buffer, "Content-Type: ");
+    while (*header_line != '\0' && strncmp(header_line, "\r\n", 2) != 0) {
+        if (strncmp(header_line, "Content-Type:", 13) == 0) {
+            sscanf(header_line, "Content-Type: %s", content_type);
+        } else if (strncmp(header_line, "Content-Length:", 15) == 0) {
+            sscanf(header_line, "Content-Length: %d", content_length);
+        }
+        // Move to the next line
+        while (*header_line != '\0' && *header_line != '\n') {
+            header_line++;
+        }
+        if (*header_line == '\n') {
+            header_line++;
+        }
+    }
 
-	if(content_type_str){
-		sscanf(content_type_str, "Content-Type: %s ", content_type);
-	}else{
-		strcpy(content_type, "text/plain");
-	}
+    if (*content_type == '\0') {
+        strcpy(content_type, "text/plain");
+    }
 }
+
+
 
 void process_form_data(const char *data){
 	char *token;
@@ -154,6 +168,21 @@ void process_json(cJSON *json){
 	}
 }
 
+void process_put_data(const char *loc, const char *data){
+	char filepath[256];
+	sprintf(filepath, "data/%s", loc);
+
+	FILE *file = fopen(filepath, "w");
+
+	if(file == NULL){
+		perror("Error opening the file");
+		return;
+	}
+
+	fwrite(data, sizeof(char), strlen(data), file);
+	fclose(file);
+}
+
 
 void *handleClient(void* client_socket_ptr){
 	int client_socket = *((int *) client_socket_ptr);
@@ -167,9 +196,9 @@ void *handleClient(void* client_socket_ptr){
 	}
 
 	char method[10], uri[50], content_type[50];
-	int content_length;
+	int content_length = 0;
 	parse_request(buffer, method, uri, &content_length);
-	parse_headers(buffer, content_type);
+	parse_headers(buffer, content_type, &content_length);
 
 	if(strcmp(method, "GET") == 0 && strcmp(uri, "/") == 0 ){
 		char* response = "HTTP/1.1 200 OK\nContent-Type: text/plain\n\nWelcome to the server!";
@@ -199,15 +228,28 @@ void *handleClient(void* client_socket_ptr){
 
 		free(post_data);
 
-	} else{
+	} else if(strcmp(method, "PUT") == 0 && strcmp(uri, "/") == 0){
+		char *put_data = malloc(content_length + 1);
+
+		if(!put_data){
+			perror("Failed to allocate memory for put request");
+			close(client_socket);
+			return NULL;
+		}
+
+		read(client_socket, put_data, content_length);
+		put_data[content_length] = '\0';
+
+		// Put Data processing
+		process_put_data(uri,put_data);	
+		free(put_data);
+
+		char* response = "HTTP/1.1 200 OK\nContent-Type: text/plain\n\nResource updated";	
+		} else {
 		char* response = "HTTP/1.1 404 Not Found\nContent-Type: text/plain\n\nResource not found";
 		send(client_socket, response, strlen(response), 0);
-	}
-
-	
+		}
 	return NULL;
-
-
 }
 
 int main() {
