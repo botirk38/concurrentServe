@@ -9,11 +9,14 @@
 #include "networking.h"
 #include "request_handler.h"
 #include "http_utils.h"
-
+#include <mongoc.h>
 
 int main() {
     int port = 8080;
     SSL_CTX *ctx;
+    mongoc_client_t *mongo_client;
+    mongo_uri_t *uri;
+    mongoc_client_pool_t *pool;
 
     int server_fd = initialize_server(port, &ctx);
     printf("Server initialized at port %d\n", port);
@@ -47,7 +50,10 @@ int main() {
 
         pthread_detach(thread_id);  // Detach the thread
     }
-
+    mongoc_client_pool_push(pool, mongo_client);
+    mongoc_client_pool_destroy(pool);
+    mongoc_uri_destroy(uri);
+    mongoc_cleanup();
     // Close the server socket
     close(server_fd);
     SSL_CTX_free(ctx);
