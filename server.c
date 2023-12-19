@@ -1,28 +1,19 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <unistd.h>
-#include <pthread.h>
-#include "ssl_utils.h"
-#include "networking.h"
-#include "request_handler.h"
-#include "http_utils.h"
-#include <mongoc.h>
+#include "server.h"
 
 int main() {
     int port = 8080;
     SSL_CTX *ctx;
-    mongoc_client_t *mongo_client;
-    mongo_uri_t *uri;
-    mongoc_client_pool_t *pool;
+
 
     int server_fd = initialize_server(port, &ctx);
     printf("Server initialized at port %d\n", port);
 
     struct sockaddr_in address;
     int addrLen = sizeof(address);
+
+    mongoc_init();
+    uri = mongoc_uri_new("your_mongodb_uri");
+    pool = mongoc_client_pool_new(uri)
 
     while (1) {
         int client_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrLen);
@@ -31,17 +22,25 @@ int main() {
             continue;
         }
 
-        int *client_socket_ptr = malloc(sizeof(int));
-        if (client_socket_ptr == NULL) {
-            perror("Failed to allocate memory for client socket.");
-            close(client_socket);  // Close the client socket as we won't be handling it
+        struct client_handling_args {
+            int client_socket;
+            mongoc_client_pool_t *mongo_pool;
+        }
+
+        
+        struct client_handling_args *args = malloc(sizeof(struct client_handling_args));
+
+        if(!args){
+            perror("Failed to allocate memory for client sockets");
+            close(client_socket);
             continue;
         }
 
-        *client_socket_ptr = client_socket;
+        args -> client_socket = client_socket;
+        arg -> mongo_client_pool_t = pool;
 
         pthread_t thread_id;
-        if (pthread_create(&thread_id, NULL, handleClient, client_socket_ptr) != 0) {
+        if (pthread_create(&thread_id, NULL, handleClient, args != 0) {
             perror("Failed to create thread");
             close(client_socket);  // Close the client socket as thread creation failed
             free(client_socket_ptr);  // Free the allocated memory
