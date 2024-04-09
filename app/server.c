@@ -8,7 +8,32 @@
 #include <unistd.h>
 
 int handle_client(int client_fd);
-void get_response(char *path, char *response);
+void get_response(char *path, char *response, char *user_agent);
+void parse_header(char *buffer, char *method, char *path, char *protocol,
+                  char *user_agent);
+
+void parse_header(char *buffer, char *method, char *path, char *protocol,
+                  char *user_agent) {
+  sscanf(buffer, "%s %s %s", method, path, protocol);
+
+  if (strcmp(path, "/user-agent") == 0) {
+    char *start = strstr(buffer, "User-Agent: ");
+
+    if (start != NULL) {
+
+      start += 12;
+
+      char *end = strstr(start, "\r\n");
+
+      ssize_t len = end - start;
+
+      strncpy(user_agent, start, len);
+
+      user_agent[len] = '\0';
+      printf("user_agent: %s\n", user_agent);
+    }
+  }
+}
 
 int handle_client(int client_fd) {
   char buffer[1024];
@@ -21,25 +46,21 @@ int handle_client(int client_fd) {
   }
 
   buffer[bytes_received] = '\0';
-  char method[10], path[100], protocol[10];
+  printf("Received: %s\n", buffer);
+  char method[10], path[100], protocol[10], user_agent[100];
 
-  sscanf(buffer, "%s %s %s", method, path, protocol);
-  printf("Method: %s\n", method);
-
-  printf("Path: %s\n", path);
-
-  printf("Protocol: %s\n", protocol);
+  parse_header(buffer, method, path, protocol, user_agent);
 
   char response[2048];
 
-  get_response(path, response);
+  get_response(path, response, user_agent);
 
   send(client_fd, response, strlen(response), 0);
 
   return 0;
 }
 
-void get_response(char *path, char *response) {
+void get_response(char *path, char *response, char *user_agent) {
   char body[1024] = "Not Found";
   char contentType[] = "Content-Type: text/plain\r\n";
   int contentLength = strlen(body);
@@ -54,7 +75,19 @@ void get_response(char *path, char *response) {
     snprintf(response, 2048,
              "HTTP/1.1 200 OK\r\n%sContent-Length: %d\r\n\r\n%s", contentType,
              contentLength, body);
-  } else {
+  } else if (strncmp(path, "/user-agent", 11) == 0) {
+    strncpy(body, user_agent, strlen(user_agent));
+contentLength = strlen(body);
+    snprintf(response, 2048,
+             "HTTP/1.1 200 OK\r\n%sContent-Length: %d\r\n\r\n%s", contentType,
+             contentLength, body);
+
+    snprintf(response, 2048,
+             "HTTP/1.1 200 OK\r\n%sContent-Length: %d\r\n\r\n%s", contentType,
+             contentLength, body);
+  }
+
+  else {
     snprintf(response, 2048,
              "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
   }
