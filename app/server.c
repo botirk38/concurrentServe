@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #define BUFFER_SIZE 1024
 #define RESPONSE_SIZE 2048
@@ -25,7 +26,7 @@ typedef struct {
 } HttpRequest;
 
 int setup_server_socket(int port);
-int handle_client(int client_fd);
+void* handle_client(void* arg);
 void parse_request(const char* buffer, HttpRequest* request);
 void build_response(const HttpRequest* request, char* response);
 
@@ -43,18 +44,23 @@ int main() {
         printf("Waiting for a client to connect...\n");
         struct sockaddr_in client_addr;
         socklen_t client_addr_len = sizeof(client_addr);
-        int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_addr_len);
+        int* client_fd = malloc(sizeof(int)); // Dynamically allocate memory for the file descriptor
+        *client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_addr_len);
 
-        if (client_fd < 0) {
+        if (*client_fd < 0) {
             perror("Accept failed");
+            free(client_fd); // Remember to free the allocated memory in case of failure
             continue;
         }
 
-        if (handle_client(client_fd) != 0) {
-            printf("Error handling client\n");
+        pthread_t thread_id;
+        if (pthread_create(&thread_id, NULL, handle_client, client_fd) != 0) {
+            perror("Failed to create thread");
+            close(*client_fd); // Close the client socket if thread creation fails
+            free(client_fd); // Free the dynamically allocated memory
+        } else {
+            pthread_detach(thread_id); // Detach the thread
         }
-
-        close(client_fd);
     }
 
     close(server_fd);
@@ -88,13 +94,15 @@ int setup_server_socket(int port) {
     return server_fd;
 }
 
-int handle_client(int client_fd) {
+void* handle_client(void* arg) {
+int client_fd = *(int*)arg; 
+free(arg);
     char buffer[BUFFER_SIZE] = {0};
     ssize_t bytes_received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
 
     if (bytes_received < 0) {
         perror("Receive failed");
-        return 1;
+        return NULL;
     }
 
     HttpRequest request;
@@ -104,8 +112,8 @@ int handle_client(int client_fd) {
     build_response(&request, response);
 
     send(client_fd, response, strlen(response), 0);
-
-    return 0;
+close(client_fd);
+    return NULL;
 }
 
 void parse_request(const char* buffer, HttpRequest* request) {
