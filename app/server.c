@@ -7,157 +7,164 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#define BUFFER_SIZE 1024
+#define RESPONSE_SIZE 2048
+#define METHOD_SIZE 10
+#define PATH_SIZE 100
+#define PROTOCOL_SIZE 10
+#define USER_AGENT_SIZE 100
+#define PORT 4221
+#define CONNECTION_BACKLOG 5
+#define CONTENT_TYPE "Content-Type: text/plain\r\n"
+
+typedef struct {
+    char method[METHOD_SIZE];
+    char path[PATH_SIZE];
+    char protocol[PROTOCOL_SIZE];
+    char user_agent[USER_AGENT_SIZE];
+} HttpRequest;
+
+int setup_server_socket(int port);
 int handle_client(int client_fd);
-void get_response(char *path, char *response, char *user_agent);
-void parse_header(char *buffer, char *method, char *path, char *protocol,
-                  char *user_agent);
+void parse_request(const char* buffer, HttpRequest* request);
+void build_response(const HttpRequest* request, char* response);
 
-void parse_header(char *buffer, char *method, char *path, char *protocol,
-                  char *user_agent) {
-  sscanf(buffer, "%s %s %s", method, path, protocol);
+int main() {
+    setbuf(stdout, NULL);
+    printf("Server starting...\n");
 
-  if (strcmp(path, "/user-agent") == 0) {
-    char *start = strstr(buffer, "User-Agent: ");
-
-    if (start != NULL) {
-
-      start += 12;
-
-      char *end = strstr(start, "\r\n");
-
-      ssize_t len = end - start;
-
-      strncpy(user_agent, start, len);
-
-      user_agent[len] = '\0';
-      printf("user_agent: %s\n", user_agent);
+    int server_fd = setup_server_socket(PORT);
+    if (server_fd < 0) {
+        perror("Failed to set up the server socket");
+        return 1;
     }
-  }
+
+    while (1) {
+        printf("Waiting for a client to connect...\n");
+        struct sockaddr_in client_addr;
+        socklen_t client_addr_len = sizeof(client_addr);
+        int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_addr_len);
+
+        if (client_fd < 0) {
+            perror("Accept failed");
+            continue;
+        }
+
+        if (handle_client(client_fd) != 0) {
+            printf("Error handling client\n");
+        }
+
+        close(client_fd);
+    }
+
+    close(server_fd);
+    return 0;
+}
+
+int setup_server_socket(int port) {
+    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd == -1) {
+        return -1;
+    }
+
+    int reuse = 1;
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0) {
+        close(server_fd);
+        return -1;
+    }
+
+    struct sockaddr_in serv_addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(port),
+        .sin_addr = {htonl(INADDR_ANY)},
+    };
+
+    if (bind(server_fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) != 0 ||
+        listen(server_fd, CONNECTION_BACKLOG) != 0) {
+        close(server_fd);
+        return -1;
+    }
+
+    return server_fd;
 }
 
 int handle_client(int client_fd) {
-  char buffer[1024];
+    char buffer[BUFFER_SIZE] = {0};
+    ssize_t bytes_received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
 
-  ssize_t bytes_received = recv(client_fd, buffer, sizeof(buffer), 0);
+    if (bytes_received < 0) {
+        perror("Receive failed");
+        return 1;
+    }
 
-  if (bytes_received < 0) {
-    printf("Receive failed: %s\n", strerror(errno));
-    return 1;
-  }
+    HttpRequest request;
+    parse_request(buffer, &request);
 
-  buffer[bytes_received] = '\0';
-  printf("Received: %s\n", buffer);
-  char method[10], path[100], protocol[10], user_agent[100];
+    char response[RESPONSE_SIZE];
+    build_response(&request, response);
 
-  parse_header(buffer, method, path, protocol, user_agent);
+    send(client_fd, response, strlen(response), 0);
 
-  char response[2048];
-
-  get_response(path, response, user_agent);
-
-  send(client_fd, response, strlen(response), 0);
-
-  return 0;
+    return 0;
 }
 
-void get_response(char *path, char *response, char *user_agent) {
-  char body[1024] = "Not Found";
-  char contentType[] = "Content-Type: text/plain\r\n";
-  int contentLength = strlen(body);
-  if (strcmp(path, "/") == 0) {
-    snprintf(response, 2048,
-             "HTTP/1.1 200 OK\r\n%sContent-Length: %d\r\n\r\n%s", contentType,
-             contentLength, body);
-  } else if (strncmp(path, "/echo/", 6) == 0) {
-    strcpy(body, path + 6);
-    contentLength = strlen(body);
+void parse_request(const char* buffer, HttpRequest* request) {
+	printf("Buffer: %s\n", buffer);
+    sscanf(buffer, "%s %s %s", request->method, request->path, request->protocol);
 
-    snprintf(response, 2048,
-             "HTTP/1.1 200 OK\r\n%sContent-Length: %d\r\n\r\n%s", contentType,
-             contentLength, body);
-  } else if (strncmp(path, "/user-agent", 11) == 0) {
-    strncpy(body, user_agent, strlen(user_agent));
-contentLength = strlen(body);
-    snprintf(response, 2048,
-             "HTTP/1.1 200 OK\r\n%sContent-Length: %d\r\n\r\n%s", contentType,
-             contentLength, body);
-
-    snprintf(response, 2048,
-             "HTTP/1.1 200 OK\r\n%sContent-Length: %d\r\n\r\n%s", contentType,
-             contentLength, body);
-  }
-
-  else {
-    snprintf(response, 2048,
-             "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
-  }
+    char* ua_start = strstr(buffer, "User-Agent: ");
+    if (ua_start) {
+        ua_start += 12; // Length of "User-Agent: "
+        char* ua_end = strstr(ua_start, "\r\n");
+        if (ua_end) {
+            size_t len = ua_end - ua_start;
+            len = len < sizeof(request->user_agent) - 1 ? len : sizeof(request->user_agent) - 1;
+            strncpy(request->user_agent, ua_start, len);
+            request->user_agent[len] = '\0';
+        }
+    }
 }
 
-int main() {
-  // Disable output buffering
-  setbuf(stdout, NULL);
+void build_response(const HttpRequest* request, char* response) {
+	printf("Request Path: %s\n", request->path);
+    if (strcmp(request->path, "/") == 0) {
+        // If the root path is requested, return a simple message
+        snprintf(response, RESPONSE_SIZE,
+                 "HTTP/1.1 200 OK\r\n"
+                 "%sContent-Length: %d\r\n\r\n"
+                 "Root path reached",
+                 CONTENT_TYPE, (int)strlen("Root path reached"));
+    }  else if(strncmp(request -> path, "/echo/", 6) == 0) {
 
-  // You can use print statements as follows for debugging, they'll be visible
-  // when running tests.
-  printf("Logs from your program will appear here!\n");
+	const char* content = request->path + 6; 
+		printf("Content: %s\n", content);
+        
+        snprintf(response, RESPONSE_SIZE,
+                 "HTTP/1.1 200 OK\r\n"
+                 "%sContent-Length: %ld\r\n\r\n" 
+                 "%s",
+                 CONTENT_TYPE, strlen(content), content);
 
-  int server_fd;
-  socklen_t client_addr_len;
-  struct sockaddr_in client_addr;
+} else if(strncmp(request -> path, "/user-agent", 11) == 0) {
+	// If the user-agent path is requested, return the user agent
+	snprintf(response, RESPONSE_SIZE,
+		 "HTTP/1.1 200 OK\r\n"
+		 "%sContent-Length: %d\r\n\r\n"
+		 "%s",
+		 CONTENT_TYPE, (int)strlen(request->user_agent), request->user_agent);
 
-  server_fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (server_fd == -1) {
-    printf("Socket creation failed: %s...\n", strerror(errno));
-    return 1;
-  }
+	}
 
-  // Since the tester restarts your program quite often, setting REUSE_PORT
-  // ensures that we don't run into 'Address already in use' errors
-  int reuse = 1;
-  if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) <
-      0) {
-    printf("SO_REUSEPORT failed: %s \n", strerror(errno));
-    return 1;
-  }
+	else {
+        // For any other path, return a 404 Not Found response
+        const char* notFoundBody = "404 Not Found";
+        snprintf(response, RESPONSE_SIZE,
+                 "HTTP/1.1 404 Not Found\r\n"
+                 "%sContent-Length: %d\r\n\r\n"
+                 "%s",
+                 CONTENT_TYPE, (int)strlen(notFoundBody), notFoundBody);
+    }
 
-  struct sockaddr_in serv_addr = {
-      .sin_family = AF_INET,
-      .sin_port = htons(4221),
-      .sin_addr = {htonl(INADDR_ANY)},
-  };
-
-  if (bind(server_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) != 0) {
-    printf("Bind failed: %s \n", strerror(errno));
-    return 1;
-  }
-
-  int connection_backlog = 5;
-  if (listen(server_fd, connection_backlog) != 0) {
-    printf("Listen failed: %s \n", strerror(errno));
-    return 1;
-  }
-
-  printf("Waiting for a client to connect...\n");
-  client_addr_len = sizeof(client_addr);
-
-  int client_fd =
-      accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-
-  if (client_fd < 0) {
-
-    printf("Accept failed: %s \n", strerror(errno));
-    return 1;
-  }
-
-  int res = handle_client(client_fd);
-
-  if (res != 0) {
-    printf("Error in handling client\n");
-    return 1;
-  }
-  close(client_fd);
-  close(server_fd);
-
-  return 0;
+	printf("Response: %s\n", response);
 }
 
