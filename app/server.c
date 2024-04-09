@@ -8,7 +8,7 @@
 #include <unistd.h>
 
 int handle_client(int client_fd);
-char *get_response(char *path);
+void get_response(char *path, char *response);
 
 int handle_client(int client_fd) {
   char buffer[1024];
@@ -19,6 +19,8 @@ int handle_client(int client_fd) {
     printf("Receive failed: %s\n", strerror(errno));
     return 1;
   }
+
+  buffer[bytes_received] = '\0';
   char method[10], path[100], protocol[10];
 
   sscanf(buffer, "%s %s %s", method, path, protocol);
@@ -28,19 +30,33 @@ int handle_client(int client_fd) {
 
   printf("Protocol: %s\n", protocol);
 
-  char *response = get_response(path);
+  char response[2048];
+
+  get_response(path, response);
 
   send(client_fd, response, strlen(response), 0);
 
   return 0;
 }
 
-char *get_response(char *path) {
-
+void get_response(char *path, char *response) {
+  char body[1024] = "Not Found";
+  char contentType[] = "Content-Type: text/plain\r\n";
+  int contentLength = strlen(body);
   if (strcmp(path, "/") == 0) {
-    return "HTTP/1.1 200 OK\r\n\r\n";
+    snprintf(response, 2048,
+             "HTTP/1.1 200 OK\r\n%sContent-Length: %d\r\n\r\n%s", contentType,
+             contentLength, body);
+  } else if (strncmp(path, "/echo/", 6) == 0) {
+    strcpy(body, path + 6);
+    contentLength = strlen(body);
+
+    snprintf(response, 2048,
+             "HTTP/1.1 200 OK\r\n%sContent-Length: %d\r\n\r\n%s", contentType,
+             contentLength, body);
   } else {
-    return "HTTP/1.1 404 Not Found\r\n\r\n";
+    snprintf(response, 2048,
+             "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
   }
 }
 
@@ -106,7 +122,7 @@ int main() {
     printf("Error in handling client\n");
     return 1;
   }
-
+  close(client_fd);
   close(server_fd);
 
   return 0;
