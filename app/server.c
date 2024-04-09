@@ -7,6 +7,43 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+int handle_client(int client_fd);
+char *get_response(char *path);
+
+int handle_client(int client_fd) {
+  char buffer[1024];
+
+  ssize_t bytes_received = recv(client_fd, buffer, sizeof(buffer), 0);
+
+  if (bytes_received < 0) {
+    printf("Receive failed: %s\n", strerror(errno));
+    return 1;
+  }
+  char method[10], path[100], protocol[10];
+
+  sscanf(buffer, "%s %s %s", method, path, protocol);
+  printf("Method: %s\n", method);
+
+  printf("Path: %s\n", path);
+
+  printf("Protocol: %s\n", protocol);
+
+  char *response = get_response(path);
+
+  send(client_fd, response, strlen(response), 0);
+
+  return 0;
+}
+
+char *get_response(char *path) {
+
+  if (strcmp(path, "/") == 0) {
+    return "HTTP/1.1 200 OK\r\n\r\n";
+  } else {
+    return "HTTP/1.1 404 Not Found\r\n\r\n";
+  }
+}
+
 int main() {
   // Disable output buffering
   setbuf(stdout, NULL);
@@ -60,18 +97,15 @@ int main() {
   if (client_fd < 0) {
 
     printf("Accept failed: %s \n", strerror(errno));
-  }
-
-  char buffer[1024];
-
-  if (recv(client_fd, buffer, 1024, 0) < 0) {
-    printf("Receive failed: %s \n", strerror(errno));
     return 1;
   }
 
-  char *response = "HTTP/1.1 200 OK\r\n\r\n";
+  int res = handle_client(client_fd);
 
-  send(client_fd, response, strlen(response), 0);
+  if (res != 0) {
+    printf("Error in handling client\n");
+    return 1;
+  }
 
   close(server_fd);
 
