@@ -35,6 +35,12 @@ void *handle_client(void *arg);
 void parse_request(const char *buffer, HttpRequest *request);
 void build_response(const HttpRequest *request, char *response, int client_fd);
 void parse_cli_args(int argc, char **argv);
+void send_headers(int client_fd, const char *status, const char *content_type, long content_length);
+void send_file(int client_fd, const char *file_path);
+void send_not_found(int client_fd);
+void send_text_response(int client_fd, const char *status, const char *content_type, const char *body);
+void handle_post_request(const HttpRequest *request, int client_fd);
+void handle_get_request(const HttpRequest *request, int client_fd);
 
 char *directory = NULL;
 
@@ -136,9 +142,8 @@ void *handle_client(void *arg)
 
   char response[RESPONSE_SIZE];
   build_response(&request, response, client_fd);
-
-  send(client_fd, response, strlen(response), 0);
   close(client_fd);
+
   return NULL;
 }
 
@@ -170,7 +175,7 @@ void parse_request(const char *buffer, HttpRequest *request)
     }
   }
 
-  char* body_start = strstr(buffer, "\r\n\r\n");
+  char *body_start = strstr(buffer, "\r\n\r\n");
   if (body_start)
   {
     body_start += 4;
@@ -186,155 +191,11 @@ void build_response(const HttpRequest *request, char *response, int client_fd)
   printf("Request Path: %s\n", request->path);
   if (strcmp(request->method, "GET") == 0)
   {
-    if (strcmp(request->path, "/") == 0)
-    {
-      // If the root path is requested, return a simple message
-      snprintf(response, RESPONSE_SIZE,
-               "HTTP/1.1 200 OK\r\n"
-               "%sContent-Length: %d\r\n\r\n"
-               "Root path reached",
-               CONTENT_TYPE, (int)strlen("Root path reached"));
-    }
-    else if (strncmp(request->path, "/echo/", 6) == 0)
-    {
-
-      const char *content = request->path + 6;
-      printf("Content: %s\n", content);
-
-      snprintf(response, RESPONSE_SIZE,
-               "HTTP/1.1 200 OK\r\n"
-               "%sContent-Length: %ld\r\n\r\n"
-               "%s",
-               CONTENT_TYPE, strlen(content), content);
-    }
-    else if (strncmp(request->path, "/user-agent", 11) == 0)
-    {
-      snprintf(response, RESPONSE_SIZE,
-               "HTTP/1.1 200 OK\r\n"
-               "%sContent-Length: %d\r\n\r\n"
-               "%s",
-               CONTENT_TYPE, (int)strlen(request->user_agent),
-               request->user_agent);
-    }
-
-    else if (strncmp(request->path, "/files/", 7) == 0)
-    {
-
-      // Construct the full file path
-      char file_path[PATH_SIZE];
-      snprintf(file_path, sizeof(file_path), "%s%s", directory,
-               request->path + 7);
-      printf("File Path: %s\n", file_path);
-
-      // Attempt to open the file
-      FILE *file = fopen(file_path, "rb");
-      if (file)
-      {
-        // File found, get file size
-        fseek(file, 0, SEEK_END);
-        long file_size = ftell(file);
-        fseek(file, 0, SEEK_SET);
-
-        // Prepare and send the HTTP headers first
-        snprintf(response, RESPONSE_SIZE,
-                 "HTTP/1.1 200 OK\r\n"
-                 "Content-Type: application/octet-stream\r\n"
-                 "Content-Length: %ld\r\n\r\n",
-                 file_size);
-        send(client_fd, response, strlen(response), 0);
-
-        // Allocate memory for reading file content
-        char *file_content = malloc(file_size);
-        if (!file_content)
-        {
-          perror("Failed to allocate memory for file content");
-          fclose(file);
-          return;
-        }
-
-        // Read file content and send it
-        fread(file_content, 1, file_size, file);
-        send(client_fd, file_content, file_size, 0); // Send the file content
-
-        // Clean up
-        free(file_content);
-        fclose(file);
-      }
-      else
-      {
-        const char *notFoundBody = "404 Not Found";
-        snprintf(response, RESPONSE_SIZE,
-                 "HTTP/1.1 404 Not Found\r\n"
-                 "Content-Type: text/plain\r\n"
-                 "Content-Length: %d\r\n\r\n"
-                 "%s",
-                 (int)strlen(notFoundBody), notFoundBody);
-      }
-    }
-
-    else
-    {
-      // For any other path, return a 404 Not Found response
-      const char *notFoundBody = "404 Not Found";
-      snprintf(response, RESPONSE_SIZE,
-               "HTTP/1.1 404 Not Found\r\n"
-               "Content-Type: text/plain\r\n"
-               "Content-Length: %d\r\n\r\n"
-               "%s",
-               (int)strlen(notFoundBody), notFoundBody);
-    }
+    handle_get_request(request, client_fd);
   }
   else if (strncmp(request->method, "POST", 4) == 0)
   {
-    printf("POST request\n");
-
-    if (strncmp(request->path, "/files/", 7) == 0)
-    {
-
-      char file_path[PATH_SIZE];
-      snprintf(file_path, sizeof(file_path), "%s%s", directory,
-               request->path + 7);
-
-      printf("File Path: %s\n", file_path);
-
-      FILE *file = fopen(file_path, "wb");
-
-      if (!file)
-      {
-        perror("Failed to open file");
-        return;
-      }
-
-      printf("Opened file\n");
-
-      char *content_file = malloc(request->content_length);
-
-      if (!content_file)
-      {
-        perror("Failed to allocate memory for file content");
-        fclose(file);
-        return;
-      }
-
-      printf("Allocated memory for file content\n");
-
-      memcpy(content_file, request->body, request->content_length);
-
-      printf("Received file content\n");
-
-      fwrite(content_file, 1, request->content_length, file);
-
-      fclose(file);
-
-      free(content_file);
-
-      const char *successMessage = "File uploaded successfully";
-      snprintf(response, RESPONSE_SIZE,
-               "HTTP/1.1 201 Created\r\n"
-               "%sContent-Length: %ld\r\n\r\n"
-               "%s",
-               CONTENT_TYPE, strlen(successMessage), successMessage);
-    }
+    handle_post_request(request, client_fd);
   }
 }
 
@@ -348,4 +209,154 @@ void parse_cli_args(int argc, char **argv)
 
   directory = argv[2];
   printf("Directory: %s\n", directory);
+}
+
+void send_headers(int client_fd, const char *status, const char *content_type, long content_length)
+{
+  char header[RESPONSE_SIZE];
+  snprintf(header, sizeof(header),
+           "%s\r\n"
+           "%sContent-Length: %ld\r\n\r\n",
+           status, content_type, content_length);
+  send(client_fd, header, strlen(header), 0);
+}
+
+void send_file(int client_fd, const char *file_path)
+{
+  FILE *file = fopen(file_path, "rb");
+  if (!file)
+  {
+    send_not_found(client_fd);
+    return;
+  }
+
+  fseek(file, 0, SEEK_END);
+  long file_size = ftell(file);
+  rewind(file);
+
+  send_headers(client_fd, "HTTP/1.1 200 OK", CONTENT_TYPE_FILE, file_size);
+
+  char *buffer = malloc(file_size);
+  if (buffer)
+  {
+    fread(buffer, 1, file_size, file);
+    send(client_fd, buffer, file_size, 0);
+    free(buffer);
+  }
+  fclose(file);
+}
+
+void send_not_found(int client_fd)
+{
+  const char *body = "404 Not Found";
+  send_text_response(client_fd, "HTTP/1.1 404 Not Found", CONTENT_TYPE, body);
+}
+
+void send_text_response(int client_fd, const char *status, const char *content_type, const char *body)
+{
+  send_headers(client_fd, status, content_type, strlen(body));
+  send(client_fd, body, strlen(body), 0);
+}
+
+void handle_post_request(const HttpRequest *request, int client_fd)
+{
+  if (strncmp(request->path, "/files/", 7) == 0)
+  {
+    char file_path[PATH_SIZE];
+    snprintf(file_path, sizeof(file_path), "%s%s", directory, request->path + 7);
+
+    // Simple path sanitation
+    if (strstr(file_path, ".."))
+    {
+      send_not_found(client_fd);
+      return;
+    }
+
+    FILE *file = fopen(file_path, "wb");
+    if (file)
+    {
+      fwrite(request->body, 1, request->content_length, file);
+      fclose(file);
+
+      // Successful file creation response
+      const char *message = "File uploaded successfully";
+      send_text_response(client_fd, "HTTP/1.1 201 Created", CONTENT_TYPE, message);
+    }
+    else
+    {
+      send_not_found(client_fd);
+    }
+  }
+  else
+  {
+    send_not_found(client_fd);
+  }
+}
+
+void handle_get_request(const HttpRequest *request, int client_fd)
+{
+  // Root path response
+  if (strcmp(request->path, "/") == 0)
+  {
+    send_text_response(client_fd, "HTTP/1.1 200 OK", CONTENT_TYPE, "Root path reached");
+  }
+  // Echo response
+  else if (strncmp(request->path, "/echo/", 6) == 0)
+  {
+    const char *content = request->path + 6;
+    send_text_response(client_fd, "HTTP/1.1 200 OK", CONTENT_TYPE, content);
+  }
+  // User-Agent response
+  else if (strncmp(request->path, "/user-agent", 11) == 0)
+  {
+    send_text_response(client_fd, "HTTP/1.1 200 OK", CONTENT_TYPE, request->user_agent);
+  }
+  // File serving from "/files/" path
+  else if (strncmp(request->path, "/files/", 7) == 0)
+  {
+    char file_path[PATH_SIZE];
+    snprintf(file_path, sizeof(file_path), "%s%s", directory, request->path + 7);
+
+    // Security: Sanitize file_path to prevent directory traversal attacks
+    if (strstr(file_path, ".."))
+    {
+      send_not_found(client_fd);
+      return;
+    }
+
+    FILE *file = fopen(file_path, "rb");
+    if (file)
+    {
+      fseek(file, 0, SEEK_END);
+      long file_size = ftell(file);
+      fseek(file, 0, SEEK_SET);
+
+      // Allocate memory for reading file content
+      char *file_content = malloc(file_size);
+      if (!file_content)
+      {
+        perror("Failed to allocate memory for file content");
+        fclose(file);
+        return;
+      }
+
+      fread(file_content, 1, file_size, file);
+      fclose(file);
+
+      // Send file content
+      send_headers(client_fd, "HTTP/1.1 200 OK", CONTENT_TYPE_FILE, file_size);
+      send(client_fd, file_content, file_size, 0); // Actual file content
+
+      free(file_content);
+    }
+    else
+    {
+      send_not_found(client_fd);
+    }
+  }
+  else
+  {
+    // If no route matched, send 404 Not Found
+    send_not_found(client_fd);
+  }
 }
