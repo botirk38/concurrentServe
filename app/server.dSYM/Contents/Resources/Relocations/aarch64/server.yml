@@ -1,0 +1,14 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '/Users/botirkhaltaev/Desktop/codecrafters-http-server-c/app/server'
+relocations:
+  - { offsetInCU: 0x26, offset: 0x26, size: 0x8, addend: 0x0, symName: _main, symObjAddr: 0x0, symBinAddr: 0x100003240, symSize: 0x184 }
+  - { offsetInCU: 0x3F, offset: 0x3F, size: 0x8, addend: 0x0, symName: _directory, symObjAddr: 0x2C80, symBinAddr: 0x100008000, symSize: 0x0 }
+  - { offsetInCU: 0xC0, offset: 0xC0, size: 0x8, addend: 0x0, symName: _main, symObjAddr: 0x0, symBinAddr: 0x100003240, symSize: 0x184 }
+  - { offsetInCU: 0x14A, offset: 0x14A, size: 0x8, addend: 0x0, symName: _parse_cli_args, symObjAddr: 0x184, symBinAddr: 0x1000033C4, symSize: 0x74 }
+  - { offsetInCU: 0x17C, offset: 0x17C, size: 0x8, addend: 0x0, symName: _setup_server_socket, symObjAddr: 0x1F8, symBinAddr: 0x100003438, symSize: 0x168 }
+  - { offsetInCU: 0x1CE, offset: 0x1CE, size: 0x8, addend: 0x0, symName: _handle_client, symObjAddr: 0x360, symBinAddr: 0x1000035A0, symSize: 0x11C }
+  - { offsetInCU: 0x23F, offset: 0x23F, size: 0x8, addend: 0x0, symName: __OSSwapInt16, symObjAddr: 0x47C, symBinAddr: 0x1000036BC, symSize: 0x24 }
+  - { offsetInCU: 0x267, offset: 0x267, size: 0x8, addend: 0x0, symName: _parse_request, symObjAddr: 0x4A0, symBinAddr: 0x1000036E0, symSize: 0x140 }
+  - { offsetInCU: 0x2DF, offset: 0x2DF, size: 0x8, addend: 0x0, symName: _build_response, symObjAddr: 0x5E0, symBinAddr: 0x100003820, symSize: 0x384 }
+...
