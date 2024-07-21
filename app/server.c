@@ -178,6 +178,7 @@ void parse_request(const char *buffer, HttpRequest *request) {
 
     if (content_encoding_end) {
 
+      strncpy(request->user_agent, content_encoding_start, len);
       request->content_encoding[len] = '\0';
     }
   }
