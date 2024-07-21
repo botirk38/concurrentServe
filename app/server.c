@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <zlib.h>
 
 #define BUFFER_SIZE 1024
 #define RESPONSE_SIZE 2048
@@ -43,13 +44,39 @@ void parse_cli_args(int argc, char **argv);
 void send_headers(int client_fd, const char *status, const char *content_type,
                   long content_length, const char *content_encoding,
                   const char *accept_encoding);
-void send_file(int client_fd, const char *file_path);
 void send_not_found(int client_fd);
 void send_text_response(int client_fd, const char *status,
                         const char *content_type, const char *body,
                         const char *accept_encoding);
 void handle_post_request(const HttpRequest *request, int client_fd);
 void handle_get_request(const HttpRequest *request, int client_fd);
+int gzip_compress(const char *src, int srcLen, char *dst, int dstLen);
+
+int gzip_compress(const char *src, int srcLen, char *dst, int dstLen) {
+  z_stream strm;
+  strm.zalloc = Z_NULL;
+  strm.zfree = Z_NULL;
+  strm.opaque = Z_NULL;
+
+  if (deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 31, 8,
+                   Z_DEFAULT_STRATEGY) != Z_OK) {
+    return -1;
+  }
+
+  strm.avail_in = srcLen;
+  strm.next_in = (Bytef *)src;
+  strm.avail_out = dstLen;
+  strm.next_out = (Bytef *)dst;
+
+  int ret = deflate(&strm, Z_FINISH);
+  deflateEnd(&strm);
+
+  if (ret != Z_STREAM_END) {
+    return -1;
+  }
+
+  return dstLen - strm.avail_out;
+}
 
 char *directory = NULL;
 
@@ -253,13 +280,32 @@ void send_not_found(int client_fd) {
 void send_text_response(int client_fd, const char *status,
                         const char *content_type, const char *body,
                         const char *accept_encoding) {
-  const char *content_encoding = NULL;
   if (accept_encoding && strstr(accept_encoding, "gzip")) {
-    content_encoding = "gzip";
+    char compressed[BUFFER_SIZE];
+    int body_length = strlen(body);
+    int compressed_length =
+        gzip_compress(body, body_length, compressed, BUFFER_SIZE);
+
+    if (compressed_length > 0) {
+      char headers[BUFFER_SIZE];
+      snprintf(headers, BUFFER_SIZE,
+               "%s\r\n"
+               "%s"
+               "Content-Encoding: gzip\r\n"
+               "Content-Length: %d\r\n\r\n",
+               status, content_type, compressed_length);
+
+      send(client_fd, headers, strlen(headers), 0);
+      send(client_fd, compressed, compressed_length, 0);
+    } else {
+      // Fallback to uncompressed if compression fails
+      send_headers(client_fd, status, content_type, strlen(body), NULL, NULL);
+      send(client_fd, body, strlen(body), 0);
+    }
+  } else {
+    send_headers(client_fd, status, content_type, strlen(body), NULL, NULL);
+    send(client_fd, body, strlen(body), 0);
   }
-  send_headers(client_fd, status, content_type, strlen(body), accept_encoding,
-               content_encoding);
-  send(client_fd, body, strlen(body), 0);
 }
 
 void handle_post_request(const HttpRequest *request, int client_fd) {
