@@ -17,6 +17,7 @@ typedef struct {
 int setup_server_socket(int port);
 void *handle_client(void *arg);
 void parse_request(const char *buffer, HttpRequest *request);
-void build_response(const HttpRequest *request, int client_fd);
+void build_response(const HttpRequest *request, int client_fd,
+                    const char *connection);
 
 #endif

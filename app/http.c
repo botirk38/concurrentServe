@@ -19,13 +19,16 @@
 static void send_headers(int client_fd, const char *status,
                          const char *content_type, long content_length,
                          const char *accept_encoding,
-                         const char *content_encoding);
-static void send_not_found(int client_fd);
+                         const char *content_encoding, const char *connection);
+static void send_not_found(int client_fd, const char *connection);
 static void send_text_response(int client_fd, const char *status,
                                const char *content_type, const char *body,
-                               const char *accept_encoding);
-static void handle_post_request(const HttpRequest *request, int client_fd);
-static void handle_get_request(const HttpRequest *request, int client_fd);
+                               const char *accept_encoding,
+                               const char *connection);
+static void handle_post_request(const HttpRequest *request, int client_fd,
+                                const char *connection);
+static void handle_get_request(const HttpRequest *request, int client_fd,
+                               const char *connection);
 
 // Set up the server socket
 int setup_server_socket(int port) {
@@ -56,6 +59,7 @@ int setup_server_socket(int port) {
   return server_fd;
 }
 
+// Thread entry point for handling a client
 void *handle_client(void *arg) {
   int client_fd = *(int *)arg;
   free(arg);
@@ -77,10 +81,19 @@ void *handle_client(void *arg) {
     memset(&request, 0, sizeof(HttpRequest));
     parse_request(buffer, &request);
 
-    build_response(&request, client_fd);
-
-    // If the client or server wants to close the connection, break
+    // Detect if the client wants to close the connection
+    int close_connection = 0;
     if (strstr(buffer, "Connection: close")) {
+      close_connection = 1;
+    }
+
+    // Pass the connection header to the response
+    const char *connection_header =
+        close_connection ? "Connection: close\r\n" : NULL;
+
+    build_response(&request, client_fd, connection_header);
+
+    if (close_connection) {
       break;
     }
   }
@@ -151,13 +164,14 @@ void parse_request(const char *buffer, HttpRequest *request) {
 }
 
 // Build and send the HTTP response
-void build_response(const HttpRequest *request, int client_fd) {
+void build_response(const HttpRequest *request, int client_fd,
+                    const char *connection) {
   if (strcmp(request->method, "GET") == 0) {
-    handle_get_request(request, client_fd);
+    handle_get_request(request, client_fd, connection);
   } else if (strcmp(request->method, "POST") == 0) {
-    handle_post_request(request, client_fd);
+    handle_post_request(request, client_fd, connection);
   } else {
-    send_not_found(client_fd);
+    send_not_found(client_fd, connection);
   }
 }
 
@@ -165,7 +179,7 @@ void build_response(const HttpRequest *request, int client_fd) {
 static void send_headers(int client_fd, const char *status,
                          const char *content_type, long content_length,
                          const char *accept_encoding,
-                         const char *content_encoding) {
+                         const char *content_encoding, const char *connection) {
   char header[RESPONSE_SIZE];
   const char *encoding_header = "";
 
@@ -177,23 +191,26 @@ static void send_headers(int client_fd, const char *status,
            "%s\r\n"
            "%s"
            "%s"
+           "%s"
            "Content-Length: %ld\r\n\r\n",
-           status, content_type, encoding_header, content_length);
+           status, content_type, encoding_header,
+           (connection ? connection : ""), content_length);
 
   send(client_fd, header, strlen(header), 0);
 }
 
 // Send a 404 Not Found response
-static void send_not_found(int client_fd) {
+static void send_not_found(int client_fd, const char *connection) {
   const char *body = "404 Not Found";
   send_text_response(client_fd, "HTTP/1.1 404 Not Found", CONTENT_TYPE, body,
-                     NULL);
+                     NULL, connection);
 }
 
 // Send a text response, optionally gzipped
 static void send_text_response(int client_fd, const char *status,
                                const char *content_type, const char *body,
-                               const char *accept_encoding) {
+                               const char *accept_encoding,
+                               const char *connection) {
   if (accept_encoding && strstr(accept_encoding, "gzip")) {
     char compressed[BUFFER_SIZE];
     int body_length = strlen(body);
@@ -206,24 +223,29 @@ static void send_text_response(int client_fd, const char *status,
                "%s\r\n"
                "%s"
                "Content-Encoding: gzip\r\n"
+               "%s"
                "Content-Length: %d\r\n\r\n",
-               status, content_type, compressed_length);
+               status, content_type, (connection ? connection : ""),
+               compressed_length);
 
       send(client_fd, headers, strlen(headers), 0);
       send(client_fd, compressed, compressed_length, 0);
     } else {
       // Fallback to uncompressed if compression fails
-      send_headers(client_fd, status, content_type, strlen(body), NULL, NULL);
+      send_headers(client_fd, status, content_type, strlen(body), NULL, NULL,
+                   connection);
       send(client_fd, body, strlen(body), 0);
     }
   } else {
-    send_headers(client_fd, status, content_type, strlen(body), NULL, NULL);
+    send_headers(client_fd, status, content_type, strlen(body), NULL, NULL,
+                 connection);
     send(client_fd, body, strlen(body), 0);
   }
 }
 
 // Handle POST requests (file upload)
-static void handle_post_request(const HttpRequest *request, int client_fd) {
+static void handle_post_request(const HttpRequest *request, int client_fd,
+                                const char *connection) {
   if (strncmp(request->path, "/files/", 7) == 0) {
     char file_path[256];
     snprintf(file_path, sizeof(file_path), "%s%s", directory,
@@ -231,7 +253,7 @@ static void handle_post_request(const HttpRequest *request, int client_fd) {
 
     // Simple path sanitation
     if (strstr(file_path, "..")) {
-      send_not_found(client_fd);
+      send_not_found(client_fd, connection);
       return;
     }
 
@@ -242,32 +264,35 @@ static void handle_post_request(const HttpRequest *request, int client_fd) {
 
       const char *message = "File uploaded successfully";
       send_text_response(client_fd, "HTTP/1.1 201 Created", CONTENT_TYPE,
-                         message, request->accept_encoding);
+                         message, request->accept_encoding, connection);
     } else {
-      send_not_found(client_fd);
+      send_not_found(client_fd, connection);
     }
   } else {
-    send_not_found(client_fd);
+    send_not_found(client_fd, connection);
   }
 }
 
 // Handle GET requests (root, echo, user-agent, file download)
-static void handle_get_request(const HttpRequest *request, int client_fd) {
+static void handle_get_request(const HttpRequest *request, int client_fd,
+                               const char *connection) {
   // Root path response
   if (strcmp(request->path, "/") == 0) {
     send_text_response(client_fd, "HTTP/1.1 200 OK", CONTENT_TYPE,
-                       "Root path reached", request->accept_encoding);
+                       "Root path reached", request->accept_encoding,
+                       connection);
   }
   // Echo response
   else if (strncmp(request->path, "/echo/", 6) == 0) {
     const char *content = request->path + 6;
     send_text_response(client_fd, "HTTP/1.1 200 OK", CONTENT_TYPE, content,
-                       request->accept_encoding);
+                       request->accept_encoding, connection);
   }
   // User-Agent response
   else if (strncmp(request->path, "/user-agent", 11) == 0) {
     send_text_response(client_fd, "HTTP/1.1 200 OK", CONTENT_TYPE,
-                       request->user_agent, request->accept_encoding);
+                       request->user_agent, request->accept_encoding,
+                       connection);
   }
   // File serving from "/files/" path
   else if (strncmp(request->path, "/files/", 7) == 0) {
@@ -277,7 +302,7 @@ static void handle_get_request(const HttpRequest *request, int client_fd) {
 
     // Security: Sanitize file_path to prevent directory traversal attacks
     if (strstr(file_path, "..")) {
-      send_not_found(client_fd);
+      send_not_found(client_fd, connection);
       return;
     }
 
@@ -291,7 +316,7 @@ static void handle_get_request(const HttpRequest *request, int client_fd) {
       if (!file_content) {
         perror("Failed to allocate memory for file content");
         fclose(file);
-        send_not_found(client_fd);
+        send_not_found(client_fd, connection);
         return;
       }
 
@@ -299,14 +324,15 @@ static void handle_get_request(const HttpRequest *request, int client_fd) {
       fclose(file);
 
       send_headers(client_fd, "HTTP/1.1 200 OK", CONTENT_TYPE_FILE, file_size,
-                   request->accept_encoding, request->content_encoding);
+                   request->accept_encoding, request->content_encoding,
+                   connection);
       send(client_fd, file_content, file_size, 0);
 
       free(file_content);
     } else {
-      send_not_found(client_fd);
+      send_not_found(client_fd, connection);
     }
   } else {
-    send_not_found(client_fd);
+    send_not_found(client_fd, connection);
   }
 }
